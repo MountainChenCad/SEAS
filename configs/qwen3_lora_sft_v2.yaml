@@ -1,0 +1,80 @@
+### ====================================
+### Qwen3-8B HRRP 目标识别 LoRA 微调配置 (v2 - 改进数据集)
+### 适用于 LLaMA-Factory 框架
+### 使用保守的LoRA参数以避免过拟合
+### ====================================
+
+### 模型配置
+model_name_or_path: /root/autodl-tmp/Qwen3-8B  # 基础模型路径
+model_type: qwen2  # Qwen3 基于 Qwen2 架构
+
+### 方法配置
+stage: sft  # 监督微调
+do_train: true
+finetuning_type: lora  # 使用 LoRA 微调
+
+### LoRA 参数 (保守配置)
+lora_target: all  # 对所有线性层应用 LoRA
+lora_rank: 8  # LoRA 秩 (r) - 保守值
+lora_alpha: 16  # LoRA 缩放因子 (alpha) - 与秩成比例
+lora_dropout: 0.05  # Dropout 率
+additional_target: null  # 额外的目标模块
+
+### 量化配置 (QLoRA)
+quantization_bit: 4  # 4-bit 量化 (节省显存)
+quantization_method: bitsandbytes  # 量化方法
+
+### 数据配置
+dataset: hrrp_sft_v2  # 使用改进的数据集 (630个高质量样本)
+template: qwen  # 使用 Qwen 的对话模板
+cutoff_len: 5000  # 最大序列长度
+max_samples: null  # 使用所有样本
+overwrite_cache: false
+preprocessing_num_workers: 16
+
+### 训练参数
+output_dir: output/qwen3-hrrp-lora-v2  # 输出目录
+overwrite_output_dir: true
+logging_steps: 10
+save_steps: 100
+eval_steps: 100
+save_total_limit: 3  # 最多保存 3 个检查点
+
+### 超参数
+per_device_train_batch_size: 4  # 每设备批次大小
+gradient_accumulation_steps: 4  # 梯度累积步数 (有效批次 = 4*4=16)
+learning_rate: 1.0e-4  # 学习率 (保守值)
+num_train_epochs: 3  # 训练轮数
+lr_scheduler_type: cosine  # 学习率调度器
+warmup_ratio: 0.1  # 预热比例
+
+### 优化器
+optim: adamw_torch  # 优化器
+adam_beta1: 0.9
+adam_beta2: 0.999
+weight_decay: 0.01
+
+### 梯度裁剪
+max_grad_norm: 1.0
+
+### 混合精度训练
+fp16: true  # 使用 FP16 混合精度
+bf16: false  # 关闭 BF16
+
+### 评估配置
+val_size: 0.1  # 验证集比例 (从630个样本中取10%)
+evaluation_strategy: steps
+per_device_eval_batch_size: 8
+predict_with_generate: false
+
+### 日志配置
+logging_dir: output/qwen3-hrrp-lora-v2/logs
+report_to: tensorboard  # 使用 TensorBoard
+
+### 分布式训练
+ddp_timeout: 1800
+ddp_find_unused_parameters: false
+
+### 其他配置
+include_num_input_tokens_seen: true
+plot_loss: true

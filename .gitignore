@@ -1,0 +1,45 @@
+# 数据和结果
+data/
+output/
+eval_results/
+archive/
+
+# 大文件
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.model
+*.pdf
+*.json
+*.log
+*.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.egg
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 环境
+.env
+.env.local
+
+# 训练相关
+*.wandb
+runs/
+tb-logs/
+logs/
+models/
+datasets/
