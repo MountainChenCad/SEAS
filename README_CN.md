@@ -3,6 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![English](https://img.shields.io/badge/Language-English-red)](README.md)
 
 > **SEAS** (Scattering-aware Episodic Learning，散射感知元学习) 是一个用于跨类别少样本飞机目标识别的元学习框架，基于高分辨距离像(HRRP)雷达信号。
 
