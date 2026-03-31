@@ -11,14 +11,6 @@
 
 ## Overview
 
-### Core Research Question
-**Can LLMs learn transferable classification capabilities from seen aircraft classes to completely unseen classes through LoRA fine-tuning?**
-
-### Key Innovation
-- **3-way 1-shot Episodic Learning**: Training on episodic tasks rather than individual samples
-- **Comparison-based Chain-of-Thought**: Reasoning by comparing query against all support classes
-- **Cross-category Generalization**: Train on 6 classes, test on 6 completely new classes
-
 ### Dataset Split
 | Split | Aircraft Classes | Purpose |
 |-------|------------------|---------|
@@ -71,66 +63,6 @@ SEAS/
 pip install -r requirements.txt
 ```
 
-### Data Preparation
-
-```bash
-# Step 1: Generate training data (requires API key)
-export SILICONFLOW_API_KEY="your_api_key"
-python scripts/01_prepare_train_data.py
-
-# Step 2: Generate evaluation data
-python scripts/02_prepare_eval_data.py
-```
-
-### Training
-
-```bash
-# LoRA fine-tuning
-python scripts/03_train_lora.py \
-    --model-path /path/to/Qwen3-8B \
-    --train-data data/hrrp_episodes_train_3way.jsonl \
-    --output-dir output/seas-3way \
-    --epochs 2 \
-    --lr 3e-4 \
-    --rank 2
-```
-
-### Evaluation
-
-```bash
-# Local inference with 4-bit quantization (memory efficient)
-python scripts/04_inference_local.py \
-    --model-path output/seas-3way/final \
-    --base-model /path/to/Qwen3-8B \
-    --eval-tasks data/hrrp_episodes_eval_3way.jsonl
-
-# Batch JSONL inference
-python scripts/05_inference_jsonl.py \
-    --model-path output/seas-3way/final \
-    --eval-data data/hrrp_episodes_eval_3way.jsonl
-
-# API evaluation (for cloud fine-tuned models)
-export SILICONFLOW_API_KEY="your_api_key"
-python scripts/06_evaluate.py
-```
-
----
-
-## Technical Details
-
-### 3-way 1-shot Episode Structure
-
-```
-Episode:
-├── Support Set (3 samples, 1 per class)
-│   ├── Class A: scattering center features
-│   ├── Class B: scattering center features
-│   └── Class C: scattering center features
-├── Query (1 sample to classify)
-│   └── Unknown aircraft scattering centers
-└── Target: Predict query class from {A, B, C}
-```
-
 ### Reverse CoT Generation
 
 Unlike traditional CoT where the model reasons then answers, we use **reverse CoT**:
@@ -162,29 +94,6 @@ LLM Inference (Qwen3-8B + LoRA)
 Classification Result
 ```
 
-### LoRA Configuration
-
-```python
-r = 2               # LoRA rank (low for quick adaptation)
-alpha = 32          # Scaling factor
-target_modules = ["q_proj", "v_proj"]  # Attention projection layers
-epochs = 2
-learning_rate = 3e-4
-```
-
-### 4-bit Quantization (for Jetson Deployment)
-
-```python
-from transformers import BitsAndBytesConfig
-
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4",
-)
-```
-
 ---
 
 ## Command Reference
@@ -196,19 +105,6 @@ python scripts/01_prepare_train_data.py --output data/hrrp_episodes_train_3way.j
 
 # Evaluation data
 python scripts/02_prepare_eval_data.py --output data/hrrp_episodes_eval_3way.jsonl
-```
-
-### Training
-```bash
-# Full training
-python scripts/03_train_lora.py \
-    --model-path /path/to/Qwen3-8B \
-    --train-data data/hrrp_episodes_train_3way.jsonl \
-    --output-dir output/seas-3way \
-    --epochs 2 --lr 3e-4 --rank 2 --batch-size 4
-
-# Monitor GPU
-watch -n 5 nvidia-smi
 ```
 
 ### Inference
