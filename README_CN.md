@@ -1,35 +1,21 @@
-# SEAS: 基于散射感知的元学习少样本HRRP分类框架
+# Scattering Aware Episodic Adaptation for Few-Shot HRRP ATR Using Large Language Models, Under Review
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![English](https://img.shields.io/badge/Language-English-red)](README.md)
 
-> **SEAS** (Scattering-aware Episodic Learning，散射感知元学习) 是一个用于跨类别少样本飞机目标识别的元学习框架，基于高分辨距离像(HRRP)雷达信号。
+> **SEAS** 是一个用于跨类别少样本飞机目标识别的小样本学习框架，基于高分辨距离像(HRRP)雷达信号。
 
 ---
 
 ## 项目概述
-
-### 核心研究问题
-**通过LoRA微调，大语言模型能否将学到的分类能力泛化到完全未见过的新飞机类别？**
-
-### 主要创新点
-- **3-way 1-shot 元学习**: 以任务(episode)为单位进行训练，而非单个样本
-- **比较式思维链(CoT)**: 通过将查询样本与所有支持类别对比进行推理
-- **跨类别泛化**: 前6类训练，后6类测试，验证模型的迁移能力
 
 ### 数据集划分
 | 数据划分 | 飞机类别 | 用途 |
 |---------|---------|------|
 | **训练集** | EA-18G, EP-3E, F15, F16, F18, F2 | LoRA微调 |
 | **测试集** | F22, F35, GlobalHawk, IDF, Mirage2000, Predator | 少样本评估 |
-
-### 实验结果
-| 模型 | 准确率 | 提升 |
-|-----|--------|-----|
-| 基线模型 (Qwen3-8B) | 62.00% | - |
-| **SEAS (LoRA微调后)** | **67.33%** | **+5.33pp** |
 
 ---
 
@@ -77,75 +63,6 @@ SEAS/
 pip install -r requirements.txt
 ```
 
-### 数据准备
-
-```bash
-# 步骤1: 生成训练数据（需要API密钥）
-export SILICONFLOW_API_KEY="your_api_key"
-python scripts/01_prepare_train_data.py
-
-# 步骤2: 生成评估数据
-python scripts/02_prepare_eval_data.py
-```
-
-### 模型训练
-
-```bash
-# LoRA微调
-python scripts/03_train_lora.py \
-    --model-path /path/to/Qwen3-8B \
-    --train-data data/hrrp_episodes_train_3way.jsonl \
-    --output-dir output/seas-3way \
-    --epochs 2 \
-    --lr 3e-4 \
-    --rank 2
-```
-
-### 模型评估
-
-```bash
-# 本地4-bit量化推理（省内存）
-python scripts/04_inference_local.py \
-    --model-path output/seas-3way/final \
-    --base-model /path/to/Qwen3-8B \
-    --eval-tasks data/hrrp_episodes_eval_3way.jsonl
-
-# JSONL批量推理
-python scripts/05_inference_jsonl.py \
-    --model-path output/seas-3way/final \
-    --eval-data data/hrrp_episodes_eval_3way.jsonl
-
-# API评估（云端微调模型）
-export SILICONFLOW_API_KEY="your_api_key"
-python scripts/06_evaluate.py
-```
-
----
-
-## 技术细节
-
-### 3-way 1-shot Episode结构
-
-```
-任务(Episode):
-├── 支持集 (3个样本，每类1个)
-│   ├── 类别A: 散射中心特征
-│   ├── 类别B: 散射中心特征
-│   └── 类别C: 散射中心特征
-├── 查询样本 (1个待分类样本)
-│   └── 未知飞机的散射中心特征
-└── 目标: 从{A, B, C}中预测查询样本类别
-```
-
-### 反向思维链(CoT)生成
-
-与传统CoT（先推理后给出答案）不同，我们使用**反向CoT**：
-1. 先告诉API正确答案
-2. 要求生成合理的推理过程，对比查询样本与所有支持类别的异同
-3. 移除答案提示，仅保留推理过程作为训练数据
-
-这确保了训练数据具有一致且高质量的推理过程。
-
 ### HRRP数据处理流程
 
 ```
@@ -168,29 +85,6 @@ python scripts/06_evaluate.py
 分类结果
 ```
 
-### LoRA配置
-
-```python
-r = 2               # LoRA秩（低秩快速适应）
-alpha = 32          # 缩放因子
-target_modules = ["q_proj", "v_proj"]  # 注意力投影层
-epochs = 2
-learning_rate = 3e-4
-```
-
-### 4-bit量化（Jetson部署）
-
-```python
-from transformers import BitsAndBytesConfig
-
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,                    # 启用4-bit
-    bnb_4bit_compute_dtype=torch.float16,  # 计算使用FP16
-    bnb_4bit_use_double_quant=True,       # 嵌套量化
-    bnb_4bit_quant_type="nf4",            # NF4量化类型
-)
-```
-
 ---
 
 ## 命令速查
@@ -202,19 +96,6 @@ python scripts/01_prepare_train_data.py --output data/hrrp_episodes_train_3way.j
 
 # 评估数据
 python scripts/02_prepare_eval_data.py --output data/hrrp_episodes_eval_3way.jsonl
-```
-
-### 模型训练
-```bash
-# 完整训练
-python scripts/03_train_lora.py \
-    --model-path /path/to/Qwen3-8B \
-    --train-data data/hrrp_episodes_train_3way.jsonl \
-    --output-dir output/seas-3way \
-    --epochs 2 --lr 3e-4 --rank 2 --batch-size 4
-
-# 监控GPU
-watch -n 5 nvidia-smi
 ```
 
 ### 推理评估
