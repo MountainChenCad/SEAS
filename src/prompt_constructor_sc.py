@@ -14,7 +14,9 @@ class PromptConstructorSC:
                  include_system_instruction=True,
                  include_background_knowledge=True,
                  include_candidate_list=True,
-                 include_output_format_instruction=True
+                 include_output_format_instruction=True,
+                 # --- Format Flags ---
+                 use_answer_tag_format=False
                  ):
         self.dataset_name_key = dataset_name_key
         self.class_names_for_task = class_names_for_task
@@ -25,6 +27,7 @@ class PromptConstructorSC:
         self.include_background_knowledge = include_background_knowledge
         self.include_candidate_list = include_candidate_list
         self.include_output_format_instruction = include_output_format_instruction
+        self.use_answer_tag_format = use_answer_tag_format
 
         self.context_header = self._build_context_header_for_sc()
 
@@ -70,12 +73,20 @@ class PromptConstructorSC:
                           "    *   Note the known class of each reference sample and compare the similarity of its scattering center pattern to the test sample.\n"
         reasoning_step3 = "3.  **Make a Comprehensive Judgment**: Based on your understanding of scattering center distribution patterns for different target types and the comparison with reference samples, determine which candidate class the test sample most closely matches.\n"
 
-        output_format_instruction_text = (
-            "4.  **Output Format** (IMPORTANT - Keep your analysis concise):\n"
-            "    *   **First**, provide a brief analysis (maximum 3-4 sentences) highlighting the key scattering center features that inform your decision.\n"
-            "    *   **Then**, on a new line, clearly state the predicted target class in the format: `Predicted Target Class: [Fill in one of the candidate class names here]`\n"
-            "    *   **Note**: Keep your entire response under 150 words to ensure clarity and efficiency."
-        )
+        if self.use_answer_tag_format:
+            output_format_instruction_text = (
+                "4.  **Output Format** (IMPORTANT - Keep your analysis concise):\n"
+                "    *   **First**, provide a brief step-by-step reasoning analyzing the scattering center features.\n"
+                "    *   **Then**, wrap your final answer in `<answer>` tags, e.g., `<answer>F22</answer>`\n"
+                "    *   **Note**: Keep your entire response under 150 words to ensure clarity and efficiency."
+            )
+        else:
+            output_format_instruction_text = (
+                "4.  **Output Format** (IMPORTANT - Keep your analysis concise):\n"
+                "    *   **First**, provide a brief analysis (maximum 3-4 sentences) highlighting the key scattering center features that inform your decision.\n"
+                "    *   **Then**, on a new line, clearly state the predicted target class in the format: `Predicted Target Class: [Fill in one of the candidate class names here]`\n"
+                "    *   **Note**: Keep your entire response under 150 words to ensure clarity and efficiency."
+            )
         # --- End English Translations ---
 
         reasoning_parts = []
@@ -125,11 +136,20 @@ class PromptConstructorSC:
 
         if self.include_output_format_instruction:
             prompt += "Please strictly follow the output format requirements.\n" # English
-            prompt += "Predicted Target Class: " # English
+            if self.use_answer_tag_format:
+                prompt += "<reasoning>\n" # Start reasoning tag for SEAS format
+            else:
+                prompt += "Predicted Target Class: " # English
         elif self.include_candidate_list:
-            prompt += "Predicted Target Class: " # English
+            if self.use_answer_tag_format:
+                prompt += "<reasoning>\n"
+            else:
+                prompt += "Predicted Target Class: " # English
         else:
-            prompt += "Your judgment is: " # English
+            if self.use_answer_tag_format:
+                prompt += "<reasoning>\n"
+            else:
+                prompt += "Your judgment is: " # English
 
         return prompt
 

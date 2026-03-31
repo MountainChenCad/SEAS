@@ -8,15 +8,70 @@ import re
 from typing import List, Optional
 
 
+def parse_zeroshot_output(response: str, class_names: List[str]) -> Optional[str]:
+    """
+    Parse zero-shot format model output.
+
+    Args:
+        response: Model generated text
+        class_names: Candidate class names ["F22", "F35", ...]
+
+    Returns:
+        Parsed class name, or None
+    """
+    if not response:
+        return None
+
+    # Strategy 1: Match "Predicted Target Class: XXX"
+    pattern = r"Predicted\s*Target\s*Class:\s*([A-Za-z0-9\-]+)"
+    match = re.search(pattern, response, re.IGNORECASE)
+    if match:
+        extracted = match.group(1).strip()
+        # Validate against class names
+        for cn in class_names:
+            if cn.lower() == extracted.lower():
+                return cn
+            if cn.replace("-", "").lower() == extracted.replace("-", "").lower():
+                return cn
+
+    # Strategy 2: Find the LAST occurrence of class names (for CoT format)
+    # The model's final decision is typically the last class mentioned
+    last_pos = -1
+    last_class = None
+
+    for cn in class_names:
+        # Find all occurrences and track the last one
+        pattern = re.compile(re.escape(cn), re.IGNORECASE)
+        matches = list(pattern.finditer(response))
+        if matches:
+            pos = matches[-1].start()  # Last occurrence
+            if pos > last_pos:
+                last_pos = pos
+                last_class = cn
+
+    if last_class:
+        return last_class
+
+    # Strategy 3: Partial match (if no exact match found)
+    response_upper = response.upper()
+    for cn in class_names:
+        if cn.upper() in response_upper:
+            return cn
+
+    return None
+
+
 def parse_llm_output_for_label(
     llm_response_text: str,
     class_names: List[str],
-    open_ended_match: bool = False
+    open_ended_match: bool = False,
+    prefer_answer_tag: bool = False
 ) -> Optional[str]:
     """
     Parse LLM response to extract predicted class label.
 
     Priority:
+    0. <answer> tag format (if prefer_answer_tag=True)
     1. Last occurrence (model's final answer)
     2. Structured format "Predicted Target Class: ..."
     3. Open-ended matching
@@ -25,12 +80,23 @@ def parse_llm_output_for_label(
         llm_response_text: Raw LLM output text
         class_names: List of valid class names
         open_ended_match: If True, use more lenient matching
+        prefer_answer_tag: If True, prioritize <answer> tag parsing (for SEAS models)
 
     Returns:
         Predicted class name if found, None otherwise
     """
     if not llm_response_text:
         return None
+
+    # Strategy 0: Parse <answer> tag (SEAS model format)
+    if prefer_answer_tag:
+        answer_match = re.search(r"<answer>\s*([^<]+?)\s*</answer>", llm_response_text, re.IGNORECASE)
+        if answer_match:
+            extracted = answer_match.group(1).strip()
+            # Check if extracted content contains a valid class name
+            for cn in class_names:
+                if cn.lower() in extracted.lower():
+                    return cn
 
     # Strategy: Find the LAST occurrence of any class name (that's the model's final answer)
     # This handles cases like "<think>...GlobalHawk...</think>\nF35" where F35 is the answer

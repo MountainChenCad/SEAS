@@ -1,31 +1,31 @@
 #!/usr/bin/env python3
 """
-Unified LoRA Fine-tuning Script for Qwen Models
+⚠️  DEPRECATED - Local LoRA Fine-tuning Script
 
-Consolidates train_lora_direct.py and train_simple_single_gpu.py
-Supports multiple quantization strategies and hardware configurations
+本脚本已被弃用，项目已迁移到SiliconFlow API框架。
 
-Usage:
-    # Basic training with 4-bit quantization
-    python scripts/train_lora.py \\
-        --model-path /root/autodl-tmp/Qwen3-8B \\
-        --data-path data/hrrp_sft_train.json \\
-        --quantization 4bit
+原始功能:
+- Unified LoRA Fine-tuning Script for Qwen Models
+- Consolidates train_lora_direct.py and train_simple_single_gpu.py
+- Supports multiple quantization strategies and hardware configurations
 
-    # Full custom configuration
-    python scripts/train_lora.py \\
-        --model-path /root/autodl-tmp/Qwen3-8B \\
-        --data-path data/hrrp_sft_train.json \\
-        --output-dir output/qwen3-hrrp-lora \\
-        --quantization 4bit \\
-        --gpu 0 \\
-        --num-epochs 3 \\
-        --batch-size 4 \\
-        --grad-accum-steps 4 \\
-        --lora-rank 16 \\
-        --lora-alpha 32 \\
-        --learning-rate 5e-5 \\
-        --max-length 5000
+当前方案:
+- 使用SiliconFlow云端微调模型（已完成）
+- 通过OpenAI兼容API进行推理评估
+- 参考: scripts/06_run_inference.py, scripts/08_eval_api_models.py
+
+如需本地训练，可参考archive/目录中的历史实验代码。
+
+====================================
+Current API-based workflow:
+1. 微调已在SiliconFlow完成，有三个checkpoint版本
+2. 使用API进行推理评估: scripts/06_run_inference.py
+3. 批量对比测试: scripts/08_eval_api_models.py
+
+详见CLAUDE.md的"常用开发命令"部分。
+====================================
+
+[原始文档已归档]
 """
 
 import os

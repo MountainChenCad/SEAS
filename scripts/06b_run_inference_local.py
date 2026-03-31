@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
-统一推理脚本 - SiliconFlow API版本
-通过OpenAI兼容接口调用SiliconFlow上的微调模型
+本地模型推理脚本 - 用于边训练边评估
 
-在6个新类上进行推理评估：F22, F35, GlobalHawk, IDF, Mirage2000, Predator
+支持从本地加载LoRA微调模型进行推理评估。
 
 Usage:
-    # 测试单个模型
-    python scripts/06_run_inference.py \
-        --model-id ft:LoRA/Qwen/Qwen2.5-7B-Instruct:rpl47v9x40:initial_commit:uyulemtufwhthcnywhcj \
+    # 评估本地checkpoint
+    python scripts/06b_run_inference_local.py \
+        --model-path output/qwen3-hrrp-seas-cot/checkpoint-500 \
         --eval-tasks data/eval_tasks_new_6classes.json \
-        --output-dir eval_results/api_initial_commit
+        --output-dir eval_results/local_ckpt_500
 
-    # 使用环境变量
-    export SILICONFLOW_API_KEY='your_api_key'
-    python scripts/06_run_inference.py --model-id <model_id>
+    # 评估最终模型
+    python scripts/06b_run_inference_local.py \
+        --model-path output/qwen3-hrrp-seas-cot \
+        --eval-tasks data/eval_tasks_new_6classes.json \
+        --output-dir eval_results/local_final
 """
 
 import json
@@ -22,27 +23,32 @@ import os
 import sys
 import argparse
 import logging
+import random
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import numpy as np
+import torch
 from scipy.io import loadmat
 from datetime import datetime
+from tqdm import tqdm
+
+# 导入transformers
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
 
 # 导入项目模块
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.api_caller_siliconflow import create_siliconflow_caller, SiliconFlowAPIError
 from src.config import SCATTERING_CENTER_EXTRACTION, SCATTERING_CENTER_ENCODING
 from src.feature_extractor import extract_scattering_centers_peak_detection
 from src.scattering_center_encoder import encode_single_sc_set_to_text
 from src.llm_utils import parse_llm_output_for_label
-from src.prompt_constructor_sc import PromptConstructorSC
+from src.prompt_constructor_seas import SEASPromptConstructor, construct_seas_prompt
 
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("inference_api.log"),
         logging.StreamHandler(),
     ],
 )
@@ -53,7 +59,7 @@ EVAL_CLASSES = ["F22", "F35", "GlobalHawk", "IDF", "Mirage2000", "Predator"]
 EVAL_TASKS_FILE = "data/eval_tasks_new_6classes.json"
 OUTPUT_DIR = "eval_results"
 
-# API超参数
+# 推理超参数
 DEFAULT_TEMPERATURE = 0.1
 DEFAULT_TOP_P = 1.0
 DEFAULT_MAX_TOKENS = 3000
@@ -62,26 +68,33 @@ DEFAULT_MAX_TOKENS = 3000
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="通过SiliconFlow API进行推理评估",
+        description="本地模型推理评估",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例：
-    # 测试初始版本
-    python scripts/06_run_inference.py \\
-        --model-id ft:LoRA/Qwen/Qwen2.5-7B-Instruct:rpl47v9x40:initial_commit:uyulemtufwhthcnywhcj
+    # 评估本地checkpoint
+    python scripts/06b_run_inference_local.py \\
+        --model-path output/qwen3-hrrp-seas-cot/checkpoint-500 \\
+        --eval-tasks data/eval_tasks_new_6classes.json
 
-    # 测试step_406 checkpoint
-    python scripts/06_run_inference.py \\
-        --model-id ft:LoRA/Qwen/Qwen2.5-7B-Instruct:rpl47v9x40:initial_commit:uyulemtufwhthcnywhcj-ckpt_step_406 \\
-        --output-dir eval_results/api_ckpt_406
+    # 快速测试（仅评估10个样本）
+    python scripts/06b_run_inference_local.py \\
+        --model-path output/qwen3-hrrp-seas-cot \\
+        --limit-samples 10
         """,
     )
 
     parser.add_argument(
-        "--model-id",
+        "--model-path",
         type=str,
         required=True,
-        help="SiliconFlow微调模型标识符",
+        help="本地模型路径（LoRA adapter目录或完整模型路径）",
+    )
+    parser.add_argument(
+        "--base-model",
+        type=str,
+        default="/root/autodl-tmp/Qwen3-8B",
+        help="基础模型路径（用于加载LoRA adapter）",
     )
     parser.add_argument(
         "--eval-tasks",
@@ -94,12 +107,6 @@ def parse_args():
         type=str,
         default=OUTPUT_DIR,
         help="输出结果目录",
-    )
-    parser.add_argument(
-        "--api-key",
-        type=str,
-        default=None,
-        help="SiliconFlow API密钥（如未提供则从环境变量SILICONFLOW_API_KEY读取）",
     )
     parser.add_argument(
         "--temperature",
@@ -120,22 +127,26 @@ def parse_args():
         help="最大生成token数",
     )
     parser.add_argument(
-        "--max-retries",
-        type=int,
-        default=3,
-        help="API调用最大重试次数",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=30,
-        help="API调用超时时间（秒）",
-    )
-    parser.add_argument(
         "--limit-samples",
         type=int,
         default=None,
         help="仅处理前N个任务（用于快速测试）",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="批处理大小（本地推理建议设为1）",
+    )
+    parser.add_argument(
+        "--bf16",
+        action="store_true",
+        help="使用bf16精度",
+    )
+    parser.add_argument(
+        "--fp16",
+        action="store_true",
+        help="使用fp16精度",
     )
 
     return parser.parse_args()
@@ -185,74 +196,128 @@ def construct_few_shot_prompt(
     query_label: str,
     support_examples: Dict[str, Tuple[str, str]],
 ) -> str:
-    """
-    构建Few-Shot Prompt
-
-    Args:
-        query_sc_text: 查询样本的散射中心文本
-        query_label: 查询样本的真实标签（用于记录）
-        support_examples: 支持样本字典，格式 {class_name: (sc_text, file_path)}
-
-    Returns:
-        完整的prompt文本
-    """
-    prompt_constructor = PromptConstructorSC(
-        dataset_name_key="aircraft_classification",
-        class_names_for_task=EVAL_CLASSES,
-        sc_encoding_config=SCATTERING_CENTER_ENCODING,
-        include_system_instruction=True,
-        include_background_knowledge=True,
-        include_candidate_list=True,
-        include_output_format_instruction=True,
-    )
-
-    # 准备支持样本
-    neighbor_examples = []
+    """构建Few-Shot Prompt（使用SEAS简化版格式，与训练数据一致）"""
+    # 准备支持样本列表
+    support_list = []
     for class_name in EVAL_CLASSES:
         if class_name in support_examples:
             sc_text, _ = support_examples[class_name]
-            neighbor_examples.append((sc_text, class_name))
+            support_list.append((sc_text, class_name))
 
-    # 构建prompt
-    full_prompt = prompt_constructor.construct_prompt_with_sc(
+    # 打乱顺序以消除Position Bias (Primacy Effect)
+    random.seed(42)  # 固定种子便于复现
+    random.shuffle(support_list)
+
+    # 使用SEAS简化版构造器
+    prompt = construct_seas_prompt(
+        support_examples=support_list,
         query_sc_text=query_sc_text,
-        neighbor_sc_examples=neighbor_examples if neighbor_examples else None,
+        class_names=EVAL_CLASSES,
+        use_answer_tag=True,
     )
 
-    return full_prompt
+    # 添加response前缀引导模型开始reasoning
+    prompt += "\n\n### Response:\n<reasoning>\n"
+
+    return prompt
+
+
+def load_model_and_tokenizer(model_path: str, base_model: str, bf16: bool = False, fp16: bool = False):
+    """加载模型和tokenizer"""
+    logger.info(f"加载模型: {model_path}")
+
+    # 确定数据类型
+    if bf16:
+        dtype = torch.bfloat16
+    elif fp16:
+        dtype = torch.float16
+    else:
+        dtype = torch.float32
+
+    # 检查是否是LoRA adapter
+    adapter_config_path = Path(model_path) / "adapter_config.json"
+    is_lora = adapter_config_path.exists()
+
+    if is_lora:
+        logger.info(f"检测到LoRA adapter，基础模型: {base_model}")
+        # 加载基础模型
+        base = AutoModelForCausalLM.from_pretrained(
+            base_model,
+            torch_dtype=dtype,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        # 加载LoRA adapter
+        model = PeftModel.from_pretrained(base, model_path)
+        tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    else:
+        # 加载完整模型
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=dtype,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+
+    # 设置padding token
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model.eval()
+    logger.info("✓ 模型加载完成")
+
+    return model, tokenizer
+
+
+def generate_response(
+    model,
+    tokenizer,
+    prompt: str,
+    temperature: float = 0.1,
+    top_p: float = 1.0,
+    max_new_tokens: int = 3000,
+) -> str:
+    """生成模型响应"""
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=4096)
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            do_sample=temperature > 0,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+
+    # 解码输出，只取新生成的部分
+    input_length = inputs["input_ids"].shape[1]
+    generated_tokens = outputs[0][input_length:]
+    response = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+
+    return response.strip()
 
 
 def run_inference_batch(
-    api_caller,
-    model_id: str,
+    model,
+    tokenizer,
     eval_tasks: List[Dict],
     temperature: float,
     top_p: float,
     max_tokens: int,
     limit_samples: Optional[int] = None,
 ) -> Tuple[List[Dict], int]:
-    """
-    批量运行推理
-
-    Args:
-        api_caller: SiliconFlowAPICaller实例
-        model_id: 模型标识符
-        eval_tasks: 评估任务列表
-        temperature: 温度参数
-        top_p: top_p参数
-        max_tokens: 最大token数
-        limit_samples: 限制处理的样本数
-
-    Returns:
-        (结果列表, 正确数)
-    """
+    """批量运行推理"""
     results = []
     correct_count = 0
 
     total_tasks = min(len(eval_tasks), limit_samples) if limit_samples else len(eval_tasks)
     logger.info(f"开始推理，总任务数: {total_tasks}")
 
-    for task_idx, task in enumerate(eval_tasks[:total_tasks]):
+    for task_idx, task in enumerate(tqdm(eval_tasks[:total_tasks], desc="推理进度")):
         task_id = task.get("task_id", f"task_{task_idx}")
 
         try:
@@ -288,51 +353,41 @@ def run_inference_batch(
             # 构建prompt
             prompt = construct_few_shot_prompt(query_sc_text, query_label, support_examples)
 
-            # 通过API调用进行推理
-            messages = [{"role": "user", "content": prompt}]
-
-            success, response = api_caller.call(
-                model=model_id,
-                messages=messages,
+            # 生成响应
+            response = generate_response(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=prompt,
                 temperature=temperature,
                 top_p=top_p,
-                max_tokens=max_tokens,
+                max_new_tokens=max_tokens,
             )
 
-            if not success or response is None:
-                logger.error(f"[{task_id}] API调用失败")
-                result = {
-                    "task_id": task_id,
-                    "query_label": query_label,
-                    "predicted_label": None,
-                    "success": False,
-                }
-            else:
-                # 解析模型输出
-                predicted_label = parse_llm_output_for_label(response, EVAL_CLASSES)
+            # 解析模型输出 (使用SEAS格式的<answer>标签解析)
+            predicted_label = parse_llm_output_for_label(response, EVAL_CLASSES, prefer_answer_tag=True)
 
-                if predicted_label is None:
-                    logger.warning(f"[{task_id}] 无法解析预测结果，原始输出: {response[:100]}...")
-                    predicted_label = "PARSE_ERROR"
+            if predicted_label is None:
+                logger.warning(f"[{task_id}] 无法解析预测结果，原始输出: {response[:100]}...")
+                predicted_label = "PARSE_ERROR"
 
-                is_correct = predicted_label == query_label
-                if is_correct:
-                    correct_count += 1
+            is_correct = predicted_label == query_label
+            if is_correct:
+                correct_count += 1
 
-                result = {
-                    "task_id": task_id,
-                    "query_label": query_label,
-                    "predicted_label": predicted_label,
-                    "is_correct": is_correct,
-                    "success": True,
-                    "response_sample": response[:200],  # 保存部分响应用于调试
-                }
+            result = {
+                "task_id": task_id,
+                "query_label": query_label,
+                "predicted_label": predicted_label,
+                "is_correct": is_correct,
+                "success": True,
+                "response_sample": response[:200],
+            }
 
-                status_symbol = "✓" if is_correct else "✗"
-                logger.info(
-                    f"[{task_id}] {status_symbol} {query_label} → {predicted_label} "
-                    f"({task_idx + 1}/{total_tasks})"
-                )
+            status_symbol = "✓" if is_correct else "✗"
+            logger.info(
+                f"[{task_id}] {status_symbol} {query_label} → {predicted_label} "
+                f"({task_idx + 1}/{total_tasks})"
+            )
 
             results.append(result)
 
@@ -354,9 +409,10 @@ def main():
     args = parse_args()
 
     logger.info("=" * 80)
-    logger.info("SiliconFlow API推理开始")
+    logger.info("本地模型推理开始")
     logger.info("=" * 80)
-    logger.info(f"模型: {args.model_id[:60]}...")
+    logger.info(f"模型路径: {args.model_path}")
+    logger.info(f"基础模型: {args.base_model}")
     logger.info(f"评估任务: {args.eval_tasks}")
     logger.info(f"输出目录: {args.output_dir}")
     logger.info(f"超参数: temperature={args.temperature}, top_p={args.top_p}, max_tokens={args.max_tokens}")
@@ -373,24 +429,23 @@ def main():
         logger.error(f"加载评估任务失败: {e}")
         return 1
 
-    # 创建API调用器
+    # 加载模型
     try:
-        api_caller = create_siliconflow_caller(api_key=args.api_key)
-        logger.info("✓ SiliconFlow API调用器初始化成功")
-    except SiliconFlowAPIError as e:
-        logger.error(f"✗ API调用器初始化失败: {e}")
-        return 1
-
-    # 验证模型标识符
-    if not api_caller.validate_model(args.model_id):
-        logger.error(f"✗ 模型标识符验证失败: {args.model_id}")
+        model, tokenizer = load_model_and_tokenizer(
+            model_path=args.model_path,
+            base_model=args.base_model,
+            bf16=args.bf16,
+            fp16=args.fp16,
+        )
+    except Exception as e:
+        logger.error(f"模型加载失败: {e}")
         return 1
 
     # 运行推理
     try:
         results, correct_count = run_inference_batch(
-            api_caller=api_caller,
-            model_id=args.model_id,
+            model=model,
+            tokenizer=tokenizer,
             eval_tasks=eval_tasks,
             temperature=args.temperature,
             top_p=args.top_p,
@@ -422,7 +477,7 @@ def main():
         with open(result_file, "w") as f:
             json.dump(
                 {
-                    "model_id": args.model_id,
+                    "model_path": args.model_path,
                     "timestamp": datetime.now().isoformat(),
                     "config": {
                         "temperature": args.temperature,

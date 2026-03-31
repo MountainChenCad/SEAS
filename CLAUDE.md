@@ -32,7 +32,9 @@ This is the guiding philosophy for all development. Adhere to it strictly.
 
 ## 项目概览
 
-**HRRPLLM (TableLlama-HRRP)** 是一个研究项目，验证**LoRA微调**能否提升LLM在**未见过的新飞机类别**上的Few-Shot分类准确率。
+**HRRPLLM (TableLlama-HRRP)** 是一个研究项目，验证**LoRA微调(SFT)**能否提升LLM在**未见过的新飞机类别**上的Few-Shot分类准确率。
+
+本项目采用**SiliconFlow API框架**，通过OpenAI兼容接口调用云端微调模型，无需本地GPU即可进行推理评估。
 
 ### 核心研究问题
 模型在前6类飞机上微调后，能否将学到的"分类推理能力"泛化到完全未见过的后6类？
@@ -42,9 +44,10 @@ This is the guiding philosophy for all development. Adhere to it strictly.
 - **后6类 (测试)**: F22, F35, GlobalHawk, IDF, Mirage2000, Predator
 
 ### 关键特性
-- **Training-Free原则**: 基线方法不更新模型参数，仅用prompt engineering
-- **LoRA微调增强**: 可选的参数高效微调来提升性能
+- **API驱动**: 通过SiliconFlow API调用云端Qwen2.5-7B微调模型
+- **三个Checkpoint评估**: initial_commit、ckpt_step_406、ckpt_step_203
 - **Few-Shot Learning**: 使用6-way 1-shot设置评估泛化能力
+- **自动化评估**: 支持批量测试多个模型版本并生成对比报告
 
 ---
 
@@ -52,54 +55,58 @@ This is the guiding philosophy for all development. Adhere to it strictly.
 
 ```
 TableLlama-HRRP/
-├── data/                                # 核心数据 (仅5个文件)
+├── data/                                # 核心数据 (5个文件)
 │   ├── hrrp_sft_from_baseline.json      # SFT源数据 (8.1MB, 1800样本)
 │   ├── hrrp_sft_train_sharegpt.json     # ShareGPT格式训练数据 (7.2MB)
 │   ├── hrrp_sft_stats.json              # 数据统计
 │   ├── eval_tasks_new_6classes.json     # 评估任务 (150个6-way 1-shot)
 │   └── qwen_baseline_6way_1shot_results_final.json  # 基线结果 (52MB)
 │
-├── scripts/                             # 7个核心脚本 (按执行顺序)
+├── scripts/                             # 9个核心脚本 (按执行顺序)
 │   ├── 01_generate_baseline_results.py # 生成基线推理结果
 │   ├── 02_extract_sft_data.py          # 从基线结果提取SFT数据
 │   ├── 03_convert_to_sharegpt.py       # 转换为ShareGPT格式
 │   ├── 04_train_lora.py                # LoRA微调训练
 │   ├── 05_generate_eval_tasks.py       # 生成新类评估任务
 │   ├── 06_run_inference.py             # 统一推理(baseline|finetuned)
-│   └── 07_compare_results.py           # 对比分析
+│   ├── 07_compare_results.py           # 对比分析
+│   ├── 08_eval_api_models.py           # API模型批量评估
+│   └── 09_eval_72b_models.py           # 72B模型评估
 │
-├── src/                                 # 6个核心模块
+├── src/                                 # 7个核心模块
 │   ├── config.py                        # 全局配置
 │   ├── feature_extractor.py            # 散射中心提取
 │   ├── scattering_center_encoder.py    # 文本编码
 │   ├── prompt_constructor_sc.py        # Prompt构建
 │   ├── llm_utils.py                    # LLM工具函数
+│   ├── api_caller_siliconflow.py       # SiliconFlow API调用器
 │   └── __init__.py
 │
-├── output/                              # 训练输出 (当前训练)
-│   └── qwen3-hrrp-lora-sft-baseline/
+├── output/                              # 训练输出
+│   └── qwen3-hrrp-lora-sft-curve-0to10/ # LoRA训练结果
 │
 ├── eval_results/                        # 评估结果
 │
+├── archive/                             # 归档内容
+│   └── dpo/                             # DPO相关文件(已归档)
+│
 ├── CLAUDE.md                            # 本文档
-├── PROJECT_STRUCTURE.md                 # 详细结构说明
-└── monitor_training.sh                  # 训练监控
+└── README.md                            # 项目说明
 ```
 
-### 整合历史 (2025-11-11)
+### 整合历史 (2026-03-27)
 **删除内容**:
-- 旧checkpoints: 7.5GB (13个过期训练输出)
-- 冗余数据: 180MB (11个中间/重复JSON)
-- 冗余脚本: 17个 (从25个减至7个)
-- 冗余文档: 30个MD文件 (仅保留本文档)
-- 未使用模块: 5个src文件 (从11个减至6个)
+- DPO相关文件: 已归档到 archive/dpo/
+  - 文档: 8个 (DPO_SETUP.md等)
+  - 脚本: 3个 (10-12)
+  - 数据: 2个 (hrrp_dpo_train.json等)
+  - 模型: qwen3-hrrp-dpo-baseline/
+  - 日志: 6个
 
-**代码整合**:
-1. 提取`llm_utils.py` - 从main_experiment.py抽取parse_llm_output_for_label
-2. 统一`06_run_inference.py` - 合并baseline和finetuned推理脚本
-3. 规范化命名 - 脚本按执行顺序编号(01-07)
-
-**空间节省**: 8.5GB → 168MB (98%减少)
+**当前结构**:
+- 9个脚本 (01-09)
+- 7个src模块
+- 5个数据文件
 
 ---
 
@@ -124,11 +131,122 @@ LoRA Adapter (output/qwen3-hrrp-lora-sft-baseline/)
 对比分析报告
 ```
 
-### 当前训练状态
-- **进度**: 训练中 (~Step 150/1800, 8.3%)
-- **身份**: PID 475771, 正常运行
-- **预期完成**: 23:16 (约2.4小时后)
-- **第一批checkpoint**: Step 500 (~21:33)
+### 项目命令
+
+**监控训练进度**:
+```bash
+bash monitor_training_core.sh
+# 或查看实时日志
+tail -f training_core_curve.log
+```
+
+**检查GPU状态**:
+```bash
+nvidia-smi
+# 或持续监控
+watch -n 5 nvidia-smi
+```
+
+**验证数据准备**:
+```bash
+# 检查训练数据
+ls -lh data/hrrp_sft_train_sharegpt.json
+# 检查评估任务
+ls -lh data/eval_tasks_new_6classes.json
+```
+
+---
+
+## 常用开发命令
+
+### 前置设置
+
+**设置API密钥**:
+```bash
+# 从 https://cloud.siliconflow.cn/account/ak 获取API密钥
+export SILICONFLOW_API_KEY='your_api_key_here'
+```
+
+### API推理评估
+
+**测试单个微调模型**:
+```bash
+# 测试 initial_commit 版本
+python scripts/06_run_inference.py \
+  --model-id ft:LoRA/Qwen/Qwen2.5-7B-Instruct:rpl47v9x40:initial_commit:uyulemtufwhthcnywhcj \
+  --eval-tasks data/eval_tasks_new_6classes.json \
+  --output-dir eval_results/api_initial_commit
+
+# 测试 step_406 checkpoint
+python scripts/06_run_inference.py \
+  --model-id ft:LoRA/Qwen/Qwen2.5-7B-Instruct:rpl47v9x40:initial_commit:uyulemtufwhthcnywhcj-ckpt_step_406 \
+  --output-dir eval_results/api_ckpt_406
+
+# 测试 step_203 checkpoint
+python scripts/06_run_inference.py \
+  --model-id ft:LoRA/Qwen/Qwen2.5-7B-Instruct:rpl47v9x40:initial_commit:uyulemtufwhthcnywhcj-ckpt_step_203 \
+  --output-dir eval_results/api_ckpt_203
+```
+
+**批量评估全部3个微调模型**:
+```bash
+python scripts/08_eval_api_models.py \
+  --eval-tasks data/eval_tasks_new_6classes.json \
+  --output-dir eval_results/api_models
+```
+
+**快速测试 (仅评估10个样本)**:
+```bash
+python scripts/08_eval_api_models.py \
+  --eval-tasks data/eval_tasks_new_6classes.json \
+  --limit-samples 10
+```
+
+**跳过推理，仅生成对比报告**:
+```bash
+python scripts/08_eval_api_models.py \
+  --eval-tasks data/eval_tasks_new_6classes.json \
+  --skip-inference
+```
+
+### 推理参数调整
+
+**调整温度参数** (影响输出的随机性):
+```bash
+# 低温度 (更确定)
+python scripts/06_run_inference.py \
+  --model-id <model_id> \
+  --temperature 0.1
+
+# 高温度 (更多样)
+python scripts/06_run_inference.py \
+  --model-id <model_id> \
+  --temperature 0.7
+```
+
+**调整最大生成长度**:
+```bash
+python scripts/06_run_inference.py \
+  --model-id <model_id> \
+  --max-tokens 5000
+```
+
+### 结果查看
+
+**查看评估结果**:
+```bash
+# 查看单个模型结果
+cat eval_results/api_initial_commit/results.json | python -m json.tool
+
+# 查看对比报告
+cat eval_results/api_models/comparison_report.md
+```
+
+**查看实时日志**:
+```bash
+tail -f inference_api.log
+tail -f eval_api_models.log
+```
 
 ---
 
@@ -192,29 +310,199 @@ Respond with ONLY the class name.
 4. **代码即文档** - 通过清晰的结构化代码展示工作流程，减少文档负担
 5. **训练在后台稳定进行** - 当前训练正常进行，预计21:33达到第一个checkpoint，23:16完成训练
 
-**下一步工作**:
-- 继续监控训练直到21:33，验证损失函数值
-- 训练完成后自动触发评估管线
-- 最终对比分析baseline vs finetuned在新类上的性能提升
+---
+
+## 架构和模块设计
+
+### API框架架构
+
+```
+SiliconFlow云端微调模型 (3个版本)
+  ├─ initial_commit
+  ├─ ckpt_step_406
+  └─ ckpt_step_203
+         ↑
+         | OpenAI兼容API
+         |
+    src/api_caller_siliconflow.py
+    (SiliconFlowAPICaller)
+         ↑
+         |
+scripts/06_run_inference.py
+    └─> 数据处理流程
+        ├─ src/feature_extractor.py (HRRP峰值提取)
+        ├─ src/scattering_center_encoder.py (文本编码)
+        ├─ src/prompt_constructor_sc.py (Prompt构建)
+        ├─ src/llm_utils.py (输出解析)
+        └─> 评估结果
+            └─> eval_results/
+```
+
+### 关键模块说明
+
+**src/api_caller_siliconflow.py**:
+- 使用 OpenAI Python SDK
+- 实现SiliconFlowAPICaller类
+- 支持自动重试（3次，指数退避）
+- 处理超时、限流等异常
+- 环境变量自动读取API密钥
+
+**scripts/06_run_inference.py**:
+- 核心推理脚本（API版本）
+- 加载150个评估任务
+- 对每个任务: 加载HRRP → 特征提取 → Prompt构建 → API调用 → 解析结果
+- 计算准确率等统计指标
+- 保存详细结果JSON
+
+**scripts/08_eval_api_models.py**:
+- 批量评估脚本
+- 自动调用06_run_inference.py处理3个模型
+- 生成Markdown对比报告
+- 支持跳过推理，仅生成报告
+
+### 数据流向
+
+**推理流程**:
+```
+评估任务 (eval_tasks_new_6classes.json, 150个任务)
+  ↓
+加载query和support HRRP文件
+  ↓
+特征提取 & 文本编码
+  ├─ extract_scattering_centers_peak_detection()
+  └─ encode_single_sc_set_to_text()
+  ↓
+构建Few-Shot Prompt
+  ├─ PromptConstructorSC 构建context header
+  └─ 插入support样本 + query样本
+  ↓
+SiliconFlow API调用
+  ├─ OpenAI兼容接口
+  └─ 模型: ft:LoRA/Qwen/...
+  ↓
+解析LLM输出
+  └─ parse_llm_output_for_label() 提取类别
+  ↓
+结果保存 (results.json)
+  └─ 准确率、逐题详情等
+```
 
 ---
 
-**项目状态**: 清理整合完成，训练正常进行中，等待首个checkpoint验证。整个项目从混乱的8.5GB精简为规范化的~170MB，代码清晰度和可维护性显著提升。
+## 关键实现细节
+
+### API调用机制 (src/api_caller_siliconflow.py)
+
+**SiliconFlowAPICaller类**:
+```python
+caller = SiliconFlowAPICaller(
+    api_key="your_key",
+    base_url="https://api.siliconflow.cn/v1",
+    max_retries=3,
+    timeout=30
+)
+
+# 调用API
+success, response = caller.call(
+    model="ft:LoRA/Qwen/...",
+    messages=[{"role": "user", "content": "prompt"}],
+    temperature=0.1,
+    max_tokens=3000
+)
+```
+
+**重试机制**:
+- 速率限制 (RateLimitError): 自动重试，指数退避
+- 连接错误 (APIConnectionError): 自动重试
+- 最大重试次数: 3次，基础延迟1秒
+
+### HRRP特征提取 (feature_extractor.py)
+
+```python
+# 使用scipy.signal.find_peaks检测显著的散射中心
+peaks, properties = scipy.signal.find_peaks(
+    normalized_hrrp,
+    prominence=0.15,      # 峰值相对高度阈值
+    distance=5            # 峰值间最小距离
+)
+# 保留幅度最大的10个峰值
+```
+
+参数说明:
+- `prominence=0.15`: 只保留相对高度超过0.15的峰值
+- `distance=5`: 峰值间距不小于5个采样点
+- 最终保留Top-10最高峰值
+
+### 文本编码格式 (scattering_center_encoder.py)
+
+```
+Position: 459:Amplitude: 1.000; Position: 568:Amplitude: 0.922; ...
+```
+
+规范:
+- 位置: 整数, 范围[0-1000]
+- 幅度: 3位小数, 范围[0.0-1.0]
+- 分隔符: `; ` (分号+空格)
+
+### Few-Shot Prompt结构 (prompt_constructor_sc.py)
+
+标准Prompt包含5个部分:
+1. **系统提示**: 任务定义和背景知识
+2. **Support样本**: 每个类别各1个已知样本
+3. **Query样本**: 待分类的未知样本
+4. **候选类别**: F22, F35, GlobalHawk, IDF, Mirage2000, Predator
+5. **输出格式指导**: "Predicted Target Class: [class_name]"
 
 ---
 
-## 📦 项目存档说明 (2025-11-15)
+## SiliconFlow API配置 (src/config.py)
 
-### 存档结构
-项目历史文件已迁移到 `archive/` 目录：
-- **archive/checkpoints/** - 中间checkpoint历史 (1.2GB)
-- **archive/logs/** - 训练/评估日志 (430KB)
-- **archive/experiments_deprecated/** - 过期实验脚本
+**SiliconFlowConfig数据类**:
+```python
+@dataclass
+class SiliconFlowConfig:
+    api_key: str = ""  # 从环境变量读取
+    base_url: str = "https://api.siliconflow.cn/v1"
 
-### 存档索引
-详细说明见 `archive/archive_index.md`
+    # 三个微调模型标识符
+    model_initial: str = "ft:LoRA/Qwen/..."
+    model_ckpt_406: str = "ft:LoRA/Qwen/...-ckpt_step_406"
+    model_ckpt_203: str = "ft:LoRA/Qwen/...-ckpt_step_203"
 
-### 当前项目状态
-- **已完成**: Baseline评估 (52.00%) + LoRA初步验证 (最优57.33%)
-- **已生成**: 完整对比报告 `EVALUATION_REPORT.md`
-- **下一步**: 核心实验曲线扩展 (0-10 Epoch, 30个checkpoint精细采样)
+    # 推理参数
+    temperature: float = 0.1
+    top_p: float = 1.0
+    max_tokens: int = 3000
+
+    # 重试策略
+    max_retries: int = 3
+    timeout: int = 30
+```
+
+**环境变量优先级**:
+1. 命令行参数 `--api-key`
+2. 环境变量 `SILICONFLOW_API_KEY`
+3. src/config.py中的默认值（留空）
+
+---
+
+## 项目现状
+
+**框架演进**:
+- ✅ **本地模型推理**: scripts/06_run_inference.py (旧版，已替换)
+- ✅ **API框架**: scripts/06_run_inference.py (新版，OpenAI兼容)
+- ✅ **批量评估**: scripts/08_eval_api_models.py (3个模型自动化测试)
+
+**代码结构**:
+- 9个脚本 (01-09)
+- 7个源模块 (config, feature_extractor, scattering_center_encoder, prompt_constructor_sc, llm_utils, api_caller_siliconflow + __init__)
+- 单一CLAUDE.md (项目指南)
+
+**评估数据**:
+- 150个6-way 1-shot任务 (eval_tasks_new_6classes.json)
+- 6个新类别 (F22, F35, GlobalHawk, IDF, Mirage2000, Predator)
+
+**下一步**:
+1. 设置SILICONFLOW_API_KEY环境变量
+2. 运行 `python scripts/08_eval_api_models.py` 批量评估模型
+3. 查看 `eval_results/api_models/comparison_report.md` 对比结果

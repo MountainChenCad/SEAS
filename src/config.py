@@ -153,7 +153,7 @@ class DatasetConfig:
 
 @dataclass
 class TrainingConfig:
-    """LoRA training configuration"""
+    """LoRA training configuration - 统一使用论文标准配置 r=2, alpha=32"""
     num_epochs: int = 3
     batch_size: int = 4
     learning_rate: float = 5e-5
@@ -161,11 +161,11 @@ class TrainingConfig:
     warmup_steps: int = 100
     save_steps: int = 500
     eval_steps: int = 100
-    lora_rank: int = 16
-    lora_alpha: int = 32
-    lora_dropout: float = 0.05
+    lora_rank: int = 2         # 统一为2，论文标准
+    lora_alpha: int = 32       # alpha=16*r
+    lora_dropout: float = 0.1  # 论文标准
     max_length: int = 5000
-    precision: str = "fp16"  # fp16 only, no quantization
+    precision: str = "fp16"
 
 
 @dataclass
@@ -254,6 +254,28 @@ class LLMConfig:
     api_provider: str = "qwen_local"
     model_path: str = "/root/autodl-tmp/Qwen"
     api_key: str = "local"
+
+
+@dataclass
+class SiliconFlowConfig:
+    """SiliconFlow API configuration for fine-tuned models"""
+    api_key: str = ""  # 从环境变量 SILICONFLOW_API_KEY 读取
+    base_url: str = "https://api.siliconflow.cn/v1"
+
+    # 三个微调模型的标识符
+    model_initial: str = "ft:LoRA/Qwen/Qwen2.5-7B-Instruct:rpl47v9x40:initial_commit:uyulemtufwhthcnywhcj"
+    model_ckpt_406: str = "ft:LoRA/Qwen/Qwen2.5-7B-Instruct:rpl47v9x40:initial_commit:uyulemtufwhthcnywhcj-ckpt_step_406"
+    model_ckpt_203: str = "ft:LoRA/Qwen/Qwen2.5-7B-Instruct:rpl47v9x40:initial_commit:uyulemtufwhthcnywhcj-ckpt_step_203"
+
+    # 推理超参数
+    temperature: float = 0.1
+    top_p: float = 1.0
+    max_tokens: int = 3000
+
+    # API调用配置
+    timeout: int = 30
+    max_retries: int = 3
+    retry_delay: float = 1.0  # 指数退避的基础延迟
 
 
 # ============================================================================
@@ -463,3 +485,50 @@ class ConfigManager:
         with open(output_path, 'w') as f:
             json.dump(config, f, indent=2)
         print(f"Configuration saved to: {output_path}")
+
+
+# ============================================================================
+# 11. DPO TRAINING CONFIGURATION
+# ============================================================================
+
+@dataclass
+class DPOTrainingConfig:
+    """DPO (Direct Preference Optimization) 训练配置"""
+    num_epochs: int = 2
+    batch_size: int = 4
+    learning_rate: float = 5e-5
+    beta: float = 0.1  # DPO温度参数
+    max_length: int = 5000
+    max_prompt_length: int = 2500
+    lora_rank: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    gradient_accumulation_steps: int = 4
+    warmup_ratio: float = 0.05
+    weight_decay: float = 0.01
+    save_steps: int = 100
+    logging_steps: int = 10
+    label_smoothing: float = 0.0
+    loss_type: str = "sigmoid"  # sigmoid or hinge
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return asdict(self)
+
+
+# DPO训练默认参数
+DEFAULT_DPO_TRAINING_PARAMS = {
+    "num_epochs": 2,
+    "batch_size": 4,
+    "learning_rate": 5e-5,
+    "beta": 0.1,
+    "max_length": 5000,
+    "lora_rank": 16,
+    "lora_alpha": 32,
+    "gradient_accumulation_steps": 4,
+}
+
+# DPO数据集路径
+DPO_DATA_PATH = "data/hrrp_dpo_train.json"
+DPO_STATS_PATH = "data/hrrp_dpo_stats.json"
+DPO_OUTPUT_DIR = "output/qwen3-hrrp-dpo-baseline"
