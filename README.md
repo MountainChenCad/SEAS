@@ -1,4 +1,4 @@
-# SEAS: Scattering-aware Episodic Learning for Few-Shot HRRP Classification
+# SEAS: Scattering-aware Episodic Learning for Few-Shot HRRP Classification, Under Review
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange)](https://pytorch.org/)
