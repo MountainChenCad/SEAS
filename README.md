@@ -25,12 +25,6 @@
 | **Train** | EA-18G, EP-3E, F15, F16, F18, F2 | LoRA fine-tuning |
 | **Test** | F22, F35, GlobalHawk, IDF, Mirage2000, Predator | Few-shot evaluation |
 
-### Results
-| Model | Accuracy | Improvement |
-|-------|----------|-------------|
-| Baseline (Qwen3-8B) | 62.00% | - |
-| **SEAS (LoRA fine-tuned)** | **67.33%** | **+5.33pp** |
-
 ---
 
 ## Project Structure
@@ -261,10 +255,10 @@ See `docs/JETSON_DEPLOYMENT.md` for detailed setup instructions.
 If you use this code in your research, please cite:
 
 ```bibtex
-@misc{seas2025,
-  title={SEAS: Scattering-aware Episodic Adaptation via Semantics for Few-Shot HRRP Classification},
-  author={SEAS Project Contributors},
-  year={2025},
+@misc{seas2026,
+  title={Scattering Aware Episodic Adaptation for Few-Shot HRRP ATR Using Large Language Models},
+  author={Lingfeng Chen, Panhe Hu, Shuanghui Zhang, Xiangfeng Qiu, Zhen Liu},
+  year={2026},
   url={https://github.com/MountainChenCad/SEAS}
 }
 ```
