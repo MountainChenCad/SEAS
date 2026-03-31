@@ -1,242 +1,280 @@
-# TableLlama-HRRP: LoRA微调的飞机识别系统
+# SEAS: Scattering-aware Episodic Learning for Few-Shot HRRP Classification
 
-> 基于Qwen3-8B的LoRA微调，用于高分辨率雷达信号(HRRP)的飞机目标识别任务
+[![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange)](https://pytorch.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-[![License](https://img.shields.io/badge/License-Private-red)]()
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)]()
-[![CUDA](https://img.shields.io/badge/CUDA-12.8-green)]()
-
-## 项目概览
-
-### 核心研究问题
-**能否通过LoRA微调提升LLM在未见过的新飞机类别上的Few-Shot分类准确率？**
-
-### 数据集划分
-- **训练集**: 前6类飞机 `(EA-18G, EP-3E, F15, F16, F18, F2)`
-- **测试集**: 后6类飞机 `(F22, F35, GlobalHawk, IDF, Mirage2000, Predator)`
-- **Few-Shot设置**: 6-way 1-shot (150个评估任务)
-
-### 核心方法论
-使用**LoRA监督微调(SFT)**在前6类飞机上训练，验证模型能否将学到的分类能力泛化到未见过的后6类飞机。
+> **SEAS** (Scattering-aware Episodic Learning) is a meta-learning framework for cross-category few-shot aircraft classification using High-Resolution Range Profile (HRRP) radar signals.
 
 ---
 
-## 项目结构
+## Overview
 
-```
-TableLlama-HRRP/
-├── scripts/                      # 9个核心脚本
-│   ├── 01_generate_baseline_results.py     # 生成基线推理结果
-│   ├── 02_extract_sft_data.py              # 从基线提取SFT训练数据
-│   ├── 03_convert_to_sharegpt.py           # 转换为ShareGPT格式
-│   ├── 04_train_lora.py                    # LoRA SFT 训练
-│   ├── 05_generate_eval_tasks.py           # 生成评估任务
-│   ├── 06_run_inference.py                 # 统一推理脚本
-│   ├── 07_compare_results.py               # 结果对比分析
-│   ├── 08_eval_api_models.py               # API模型批量评估
-│   └── 09_eval_72b_models.py               # 72B模型评估
-│
-├── src/                          # 核心模块
-│   ├── config.py                 # 全局配置
-│   ├── feature_extractor.py      # HRRP散射中心提取
-│   ├── scattering_center_encoder.py  # 文本编码
-│   ├── prompt_constructor_sc.py  # Prompt构建
-│   ├── llm_utils.py              # LLM工具函数
-│   ├── api_caller_siliconflow.py # SiliconFlow API调用器
-│   └── __init__.py
-│
-├── data/                         # 核心数据文件
-│   ├── hrrp_sft_from_baseline.json        # SFT源数据 (1800 samples)
-│   ├── hrrp_sft_train_sharegpt.json       # ShareGPT格式训练数据
-│   ├── hrrp_sft_stats.json                # 数据统计
-│   ├── eval_tasks_new_6classes.json       # 150个评估任务
-│   └── qwen_baseline_6way_1shot_results_final.json  # 基线结果
-│
-├── output/                       # 训练输出
-│   └── qwen3-hrrp-lora-sft-curve-0to10/   # LoRA训练结果
-│
-├── eval_results/                 # 评估结果
-├── archive/                      # 归档内容
-│   └── dpo/                      # DPO相关文件(已归档)
-│
-├── CLAUDE.md                     # 项目维护指南
-└── README.md                     # 本文档
-```
+### Core Research Question
+**Can LLMs learn transferable classification capabilities from seen aircraft classes to completely unseen classes through LoRA fine-tuning?**
+
+### Key Innovation
+- **3-way 1-shot Episodic Learning**: Training on episodic tasks rather than individual samples
+- **Comparison-based Chain-of-Thought**: Reasoning by comparing query against all support classes
+- **Cross-category Generalization**: Train on 6 classes, test on 6 completely new classes
+
+### Dataset Split
+| Split | Aircraft Classes | Purpose |
+|-------|------------------|---------|
+| **Train** | EA-18G, EP-3E, F15, F16, F18, F2 | LoRA fine-tuning |
+| **Test** | F22, F35, GlobalHawk, IDF, Mirage2000, Predator | Few-shot evaluation |
+
+### Results
+| Model | Accuracy | Improvement |
+|-------|----------|-------------|
+| Baseline (Qwen3-8B) | 62.00% | - |
+| **SEAS (LoRA fine-tuned)** | **67.33%** | **+5.33pp** |
 
 ---
 
-## 快速开始
+## Project Structure
 
-### 环境要求
-```bash
-# 系统环境
-Python >= 3.10.8
-CUDA >= 12.0
-GPU内存 >= 16GB (推荐 32GB+)
-
-# 核心库
-transformers >= 4.50.0
-peft >= 0.15.0
-datasets >= 4.0.0
-torch >= 2.0.0
 ```
-
-### 安装依赖
-```bash
-pip install transformers peft datasets torch scipy numpy
-
-# API调用 (可选)
-pip install openai aiohttp
-```
-
-### 本地模型准备
-```bash
-# 使用本地Qwen3-8B模型
-export QWEN_MODEL_PATH=/root/autodl-tmp/Qwen3-8B
+SEAS/
+├── scripts/                      # Core scripts (6 files)
+│   ├── 01_prepare_train_data.py  # Generate training data with reverse CoT
+│   ├── 02_prepare_eval_data.py   # Generate evaluation episodes
+│   ├── 03_train_lora.py          # LoRA fine-tuning
+│   ├── 04_inference_local.py     # Local inference (4-bit quantization)
+│   ├── 05_inference_jsonl.py     # Batch JSONL inference
+│   └── 06_evaluate.py            # API model evaluation
+│
+├── src/                          # Core modules (5 files)
+│   ├── config.py                 # Global configuration
+│   ├── feature_extractor.py      # Scattering center extraction
+│   ├── encoder.py                # Text encoding
+│   ├── llm_utils.py              # LLM output parsing
+│   └── prompt_builder.py         # Prompt construction
+│
+├── data/                         # Data directory
+│   ├── hrrp_episodes_train_3way.jsonl   # Training data (3,263 episodes)
+│   └── hrrp_episodes_eval_3way.jsonl    # Evaluation data (150 episodes)
+│
+├── README.md                     # This file (English)
+├── README_CN.md                  # Chinese version
+├── LICENSE                       # MIT License
+└── requirements.txt              # Dependencies
 ```
 
 ---
 
-## 核心实验
+## Quick Start
 
-### 训练LoRA模型
+### Environment Setup
 
 ```bash
-python scripts/04_train_lora.py \
-  --model-path /root/autodl-tmp/Qwen3-8B \
-  --data-path data/hrrp_sft_train_sharegpt.json \
-  --output-dir output/qwen3-hrrp-lora-sft \
-  --num-epochs 10 \
-  --batch-size 4 \
-  --learning-rate 5e-5 \
-  --lora-rank 16
+# Python >= 3.10
+# CUDA >= 12.0 (for GPU training)
+# GPU Memory >= 16GB (recommended 32GB+)
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-### 评估模型
+### Data Preparation
 
 ```bash
-python scripts/06_run_inference.py \
-  --model-id output/qwen3-hrrp-lora-sft \
-  --eval-tasks data/eval_tasks_new_6classes.json \
-  --output-dir eval_results/lora_baseline
+# Step 1: Generate training data (requires API key)
+export SILICONFLOW_API_KEY="your_api_key"
+python scripts/01_prepare_train_data.py
+
+# Step 2: Generate evaluation data
+python scripts/02_prepare_eval_data.py
+```
+
+### Training
+
+```bash
+# LoRA fine-tuning
+python scripts/03_train_lora.py \
+    --model-path /path/to/Qwen3-8B \
+    --train-data data/hrrp_episodes_train_3way.jsonl \
+    --output-dir output/seas-3way \
+    --epochs 2 \
+    --lr 3e-4 \
+    --rank 2
+```
+
+### Evaluation
+
+```bash
+# Local inference with 4-bit quantization (memory efficient)
+python scripts/04_inference_local.py \
+    --model-path output/seas-3way/final \
+    --base-model /path/to/Qwen3-8B \
+    --eval-tasks data/hrrp_episodes_eval_3way.jsonl
+
+# Batch JSONL inference
+python scripts/05_inference_jsonl.py \
+    --model-path output/seas-3way/final \
+    --eval-data data/hrrp_episodes_eval_3way.jsonl
+
+# API evaluation (for cloud fine-tuned models)
+export SILICONFLOW_API_KEY="your_api_key"
+python scripts/06_evaluate.py
 ```
 
 ---
 
-## 技术细节
+## Technical Details
 
-### HRRP数据处理流程
-
-```
-HRRP数据 (.mat文件)
-    ↓
-读取复数向量 [200维]
-    ↓
-提取实部和幅度 → 归一化到[0,1]
-    ↓
-散射中心提取 (peak detection)
-    ├─ 峰值显著性阈值: 0.15
-    ├─ 最小间距: 5个采样点
-    └─ 保留Top-10最高峰值
-    ↓
-文本编码 (scattering center encoding)
-    ↓
-Few-Shot Prompt构建
-    ↓
-LLM推理 (Qwen3-8B)
-    ↓
-分类结果
-```
-
-### Few-Shot Prompt 结构
+### 3-way 1-shot Episode Structure
 
 ```
-System: You are an expert in aircraft classification...
+Episode:
+├── Support Set (3 samples, 1 per class)
+│   ├── Class A: scattering center features
+│   ├── Class B: scattering center features
+│   └── Class C: scattering center features
+├── Query (1 sample to classify)
+│   └── Unknown aircraft scattering centers
+└── Target: Predict query class from {A, B, C}
+```
 
-User:
-Known aircraft examples (1 per class, 6 classes):
+### Reverse CoT Generation
 
-Class 'F22':
-Scattering Centers: Position: 459:Amplitude: 1.000; Position: 568:Amplitude: 0.922; ...
+Unlike traditional CoT where the model reasons then answers, we use **reverse CoT**:
+1. Tell the API the correct answer
+2. Ask it to generate plausible reasoning comparing query against all support classes
+3. Remove the answer hint, keep only the reasoning for training
 
-Class 'F35':
-Scattering Centers: Position: 478:Amplitude: 0.918; Position: 595:Amplitude: 0.850; ...
+This ensures consistent, high-quality reasoning for training data.
 
-[... 共6个类别的support样本]
+### HRRP Processing Pipeline
 
-Unknown aircraft to classify:
-Scattering Centers: Position: 487:Amplitude: 1.000; Position: 602:Amplitude: 0.896; ...
+```
+Raw HRRP (.mat file)
+    ↓
+Complex vector → Real amplitude → Normalization [0,1]
+    ↓
+Peak Detection (scipy.signal.find_peaks)
+    ├── Prominence threshold: 0.15
+    ├── Min distance: 5 samples
+    └── Keep top-10 peaks
+    ↓
+Text Encoding
+    Format: "Position: 459:Amplitude: 1.000; Position: 568:Amplitude: 0.922; ..."
+    ↓
+Few-Shot Prompt Construction
+    ↓
+LLM Inference (Qwen3-8B + LoRA)
+    ↓
+Classification Result
+```
 
-Candidate classes: F22, F35, GlobalHawk, IDF, Mirage2000, Predator
-Respond with ONLY the class name.
+### LoRA Configuration
+
+```python
+r = 2               # LoRA rank (low for quick adaptation)
+alpha = 32          # Scaling factor
+target_modules = ["q_proj", "v_proj"]  # Attention projection layers
+epochs = 2
+learning_rate = 3e-4
+```
+
+### 4-bit Quantization (for Jetson Deployment)
+
+```python
+from transformers import BitsAndBytesConfig
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type="nf4",
+)
 ```
 
 ---
 
-## 命令速查表
+## Command Reference
 
-### 数据处理
+### Data Generation
 ```bash
-# 生成评估任务
-python scripts/05_generate_eval_tasks.py
+# Training data (requires API)
+python scripts/01_prepare_train_data.py --output data/hrrp_episodes_train_3way.jsonl
 
-# 查看数据统计
-python -c "import json; d=json.load(open('data/hrrp_sft_stats.json')); print(json.dumps(d, indent=2))"
+# Evaluation data
+python scripts/02_prepare_eval_data.py --output data/hrrp_episodes_eval_3way.jsonl
 ```
 
-### 模型训练
+### Training
 ```bash
-# LoRA训练
-python scripts/04_train_lora.py --num-epochs 10 --lora-rank 16
+# Full training
+python scripts/03_train_lora.py \
+    --model-path /path/to/Qwen3-8B \
+    --train-data data/hrrp_episodes_train_3way.jsonl \
+    --output-dir output/seas-3way \
+    --epochs 2 --lr 3e-4 --rank 2 --batch-size 4
 
-# 查看GPU使用
-nvidia-smi
+# Monitor GPU
 watch -n 5 nvidia-smi
 ```
 
-### 模型评估
+### Inference
 ```bash
-# 评估本地模型
-python scripts/06_run_inference.py \
-  --model-id output/qwen3-hrrp-lora-sft \
-  --eval-tasks data/eval_tasks_new_6classes.json
+# Local 4-bit inference
+python scripts/04_inference_local.py \
+    --model-path output/seas-3way/final \
+    --eval-tasks data/hrrp_episodes_eval_3way.jsonl \
+    --limit-samples 10  # Quick test
 
-# 批量评估API模型
-python scripts/08_eval_api_models.py --eval-tasks data/eval_tasks_new_6classes.json
+# JSONL batch inference
+python scripts/05_inference_jsonl.py \
+    --model-path output/seas-3way/final \
+    --eval-data data/hrrp_episodes_eval_3way.jsonl
 
-# 对比多个模型
-python scripts/07_compare_results.py
+# API evaluation
+python scripts/06_evaluate.py \
+    --model-id ft:LoRA/Qwen/Qwen3-8B:your-model-id \
+    --eval-tasks data/hrrp_episodes_eval_3way.jsonl
 ```
 
 ---
 
-## 参考资源
+## Deployment
 
-### 开源库
-- **PEFT**: https://huggingface.co/docs/peft/ (LoRA适配器)
-- **Transformers**: https://huggingface.co/docs/transformers/ (模型加载)
+### Jetson Orin Nano (8GB)
 
-### 相关项目
-- **Qwen官方**: https://huggingface.co/Qwen
+A deployment package is available with 4-bit quantization support:
 
----
+```bash
+# Download base model on Jetson
+python scripts/download_model.py --model Qwen/Qwen3-8B
 
-## 项目信息
+# Run inference
+python scripts/inference.py --adapter-path model/ --max-samples 10
+```
 
-**项目名称**: TableLlama-HRRP
-**研究方向**: LoRA微调用于Few-Shot飞机识别
-**核心方法**: LoRA + SFT
-**数据来源**: HRRP飞机识别任务
-**模型基础**: Qwen3-8B
+See `docs/JETSON_DEPLOYMENT.md` for detailed setup instructions.
 
 ---
 
-## 许可证
+## Citation
 
-Private Repository - TableLlama-HRRP Research Project
+If you use this code in your research, please cite:
+
+```bibtex
+@misc{seas2025,
+  title={SEAS: Scattering-aware Episodic Learning for Few-Shot HRRP Classification},
+  author={SEAS Project Contributors},
+  year={2025},
+  url={https://github.com/MountainChenCad/SEAS}
+}
+```
 
 ---
 
-**最后更新**: 2026-03-27
-**项目状态**: 活跃开发中
+## License
 
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+**Last Updated**: 2026-03-31
+**Status**: Active Development

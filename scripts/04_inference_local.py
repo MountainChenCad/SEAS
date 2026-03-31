@@ -40,9 +40,9 @@ from peft import PeftModel
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import SCATTERING_CENTER_EXTRACTION, SCATTERING_CENTER_ENCODING
 from src.feature_extractor import extract_scattering_centers_peak_detection
-from src.scattering_center_encoder import encode_single_sc_set_to_text
+from src.encoder import encode_single_sc_set_to_text
 from src.llm_utils import parse_llm_output_for_label
-from src.prompt_constructor_seas import SEASPromptConstructor, construct_seas_prompt
+from src.prompt_builder import PromptConstructorSC
 
 # 配置日志
 logging.basicConfig(
@@ -196,7 +196,7 @@ def construct_few_shot_prompt(
     query_label: str,
     support_examples: Dict[str, Tuple[str, str]],
 ) -> str:
-    """构建Few-Shot Prompt（使用SEAS简化版格式，与训练数据一致）"""
+    """构建Few-Shot Prompt（使用PromptConstructorSC，与训练数据一致）"""
     # 准备支持样本列表
     support_list = []
     for class_name in EVAL_CLASSES:
@@ -208,12 +208,21 @@ def construct_few_shot_prompt(
     random.seed(42)  # 固定种子便于复现
     random.shuffle(support_list)
 
-    # 使用SEAS简化版构造器
-    prompt = construct_seas_prompt(
-        support_examples=support_list,
+    # 使用PromptConstructorSC构造prompt
+    constructor = PromptConstructorSC(
+        dataset_name_key="simulated_hrrp",
+        class_names_for_task=EVAL_CLASSES,
+        sc_encoding_config=SCATTERING_CENTER_ENCODING,
+        include_system_instruction=True,
+        include_background_knowledge=True,
+        include_candidate_list=True,
+        include_output_format_instruction=True,
+        use_answer_tag_format=True,
+    )
+
+    prompt = constructor.construct_prompt_with_sc(
         query_sc_text=query_sc_text,
-        class_names=EVAL_CLASSES,
-        use_answer_tag=True,
+        neighbor_sc_examples=support_list,
     )
 
     # 添加response前缀引导模型开始reasoning
