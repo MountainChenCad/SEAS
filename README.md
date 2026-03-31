@@ -1,11 +1,11 @@
-# SEAS: Scattering-aware Episodic Learning for Few-Shot HRRP Classification, Under Review
+# Scattering Aware Episodic Adaptation for Few-Shot HRRP ATR Using Large Language Models, Under Review
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![中文](https://img.shields.io/badge/语言-简体中文-red)](README_CN.md)
 
-> **SEAS** (Scattering-aware Episodic Learning) is a meta-learning framework for cross-category few-shot aircraft classification using High-Resolution Range Profile (HRRP) radar signals.
+> **SEAS** (Scattering-aware Episodic Adaptation via Semantics) is a meta-learning framework for cross-category few-shot aircraft classification using High-Resolution Range Profile (HRRP) radar signals.
 
 ---
 
@@ -262,7 +262,7 @@ If you use this code in your research, please cite:
 
 ```bibtex
 @misc{seas2025,
-  title={SEAS: Scattering-aware Episodic Learning for Few-Shot HRRP Classification},
+  title={SEAS: Scattering-aware Episodic Adaptation via Semantics for Few-Shot HRRP Classification},
   author={SEAS Project Contributors},
   year={2025},
   url={https://github.com/MountainChenCad/SEAS}
